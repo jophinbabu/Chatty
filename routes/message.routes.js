@@ -3,6 +3,7 @@ import {
   sendMessage,
   getMessages,
   markMessagesAsRead,
+  transcribeAudio,
 } from "../controllers/message.controller.js";
 import { protect } from "../middleware/authMiddleware.js";
 
@@ -14,5 +15,8 @@ router.get("/:id", protect, getMessages);
 // Send a message to user with :id
 router.post("/send/:id", protect, sendMessage);
 router.put("/read/:id", protect, markMessagesAsRead);
+
+// Transcribe audio
+router.post("/transcribe", protect, transcribeAudio);
 
 export default router;

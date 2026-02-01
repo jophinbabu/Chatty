@@ -1,13 +1,50 @@
 import { Server } from "socket.io";
 import http from "http";
+import https from "https";
 import express from "express";
+import selfsigned from "selfsigned";
+import fs from "fs";
+import path from "path";
+import dotenv from "dotenv";
+
+dotenv.config();
 
 const app = express();
-const server = http.createServer(app);
+let server;
+
+// Production: Use standard HTTP (Render handles SSL termination)
+if (process.env.NODE_ENV === "production") {
+  server = http.createServer(app);
+} else {
+  // Development: Generate self-signed SSL for local HTTPS
+  const certPath = path.resolve("./certs");
+  if (!fs.existsSync(certPath)) fs.mkdirSync(certPath, { recursive: true });
+
+  let httpsOptions = {};
+  const keyFile = path.join(certPath, "key.pem");
+  const certFile = path.join(certPath, "cert.pem");
+
+  if (fs.existsSync(keyFile) && fs.existsSync(certFile)) {
+    httpsOptions = {
+      key: fs.readFileSync(keyFile),
+      cert: fs.readFileSync(certFile),
+    };
+  } else {
+    console.log("Generating self-signed certificates...");
+    // Note: await is inside top-level execution which works in modules, 
+    // but strict checks might prefer async wrapper. Assuming ESM.
+    const pems = await selfsigned.generate([{ name: "commonName", value: "localhost" }], { days: 365 });
+    fs.writeFileSync(keyFile, pems.private);
+    fs.writeFileSync(certFile, pems.cert);
+    httpsOptions = { key: pems.private, cert: pems.cert };
+    console.log("Certificates generated.");
+  }
+  server = https.createServer(httpsOptions, app);
+}
 
 const io = new Server(server, {
   cors: {
-    origin: ["http://localhost:5173"],
+    origin: process.env.CLIENT_URL ? [process.env.CLIENT_URL] : ["http://localhost:5173", "https://localhost:5173", "https://192.168.1.9:5173"],
     methods: ["GET", "POST"],
   },
 });

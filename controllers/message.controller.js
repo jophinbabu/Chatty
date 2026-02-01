@@ -5,20 +5,14 @@ import { uploadToS3 } from "../lib/s3.js";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import dotenv from "dotenv";
 
-dotenv.config();
+console.log("🔄 Message Controller Loaded"); // Trigger restart
 
-// --- AI Configuration ---
-let model;
-if (process.env.GEMINI_API_KEY) {
-  const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-  model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
-} else {
-  console.warn("⚠️ GEMINI_API_KEY is missing. AI features will not work.");
-}
+dotenv.config();
 
 // --- Helper: Process Base64 ---
 const processBase64 = (base64String) => {
-  const matches = base64String.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
+  // Updated regex to handle mimeTypes with parameters like audio/webm;codecs=opus
+  const matches = base64String.match(/^data:([A-Za-z-+\/;=\w]+);base64,(.+)$/);
 
   if (!matches || matches.length !== 3) {
     throw new Error("Invalid base64 string");
@@ -27,16 +21,19 @@ const processBase64 = (base64String) => {
   const mimetype = matches[1];
   const base64Data = matches[2];
   const buffer = Buffer.from(base64Data, "base64");
-  const type = mimetype.split("/")[1];
+
+  // Extract base type without codec params (e.g., "webm" from "audio/webm;codecs=opus")
+  const baseMimetype = mimetype.split(";")[0]; // Remove codec params
+  const type = baseMimetype.split("/")[1]; // Get extension
   const fileName = `${Date.now()}-${Math.round(Math.random() * 1000)}.${type}`;
 
-  return { buffer, fileName, mimetype };
+  return { buffer, fileName, mimetype: baseMimetype }; // Use base mimetype for S3
 };
 
 // --- Controller: Send Message ---
 export const sendMessage = async (req, res) => {
   try {
-    const { text, image, audio } = req.body;
+    const { text, image, audio, duration } = req.body;
     const { id: receiverId } = req.params;
     const senderId = req.user.id;
 
@@ -73,6 +70,7 @@ export const sendMessage = async (req, res) => {
       text,
       image: imageUrl,
       audioUrl: audioUrl,
+      duration: duration || 0, // Save duration
       isRead: false,
     });
 
@@ -97,12 +95,38 @@ export const sendMessage = async (req, res) => {
     // ---------------------------------------------------------
     // 🚀 AI INTEGRATION LOGIC
     // ---------------------------------------------------------
-    // Check if the receiver is the AI User ID (Set this in your .env)
-    if (receiverId === process.env.AI_USER_ID && text && model) {
+    // Check if the receiver is the AI User ID AND we have an API Key
+    if (receiverId === process.env.AI_USER_ID && text && process.env.GEMINI_API_KEY) {
       try {
-        // A. Generate AI Response
-        const result = await model.generateContent(text);
-        const aiResponseText = result.response.text();
+        const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+        let aiResponseText = "";
+
+        try {
+          // Fallback list based on available models for this specific API key
+          const modelsToTry = ["gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-flash-latest", "gemini-pro-latest"];
+          let lastError = null;
+
+          for (const modelName of modelsToTry) {
+            try {
+              console.log(`🤖 Attempting AI generation with model: ${modelName}`);
+              const model = genAI.getGenerativeModel({ model: modelName });
+              const result = await model.generateContent(text);
+              aiResponseText = result.response.text();
+              console.log(`✅ Success with ${modelName}`);
+              break; // Success! Exit loop
+            } catch (e) {
+              console.warn(`⚠️ Model ${modelName} failed: ${e.message}`);
+              lastError = e;
+              // Continue to next model
+            }
+          }
+
+          if (!aiResponseText && lastError) {
+            throw lastError;
+          }
+        } catch (finalError) {
+          throw finalError;
+        }
 
         // B. Create AI Message Object
         const aiMessage = new Message({
@@ -128,8 +152,28 @@ export const sendMessage = async (req, res) => {
         }
 
       } catch (aiError) {
-        console.error("❌ AI Generation Failed:", aiError);
-        // Optional: Send a fallback message if AI fails
+        console.error("❌ All AI Models Failed:", aiError);
+
+        // Fallback message with debug info
+        const fallbackMessage = new Message({
+          conversationId: conversation._id,
+          sender: receiverId,
+          text: "I'm having trouble connecting to AI. Error: " + (aiError.message || "Unknown Error"),
+          isRead: false,
+        });
+
+        await fallbackMessage.save();
+        conversation.lastMessage = {
+          text: fallbackMessage.text,
+          sender: receiverId,
+          createdAt: new Date(),
+        };
+        await conversation.save();
+
+        const senderSocketId = getReceiverSocketId(senderId);
+        if (senderSocketId) {
+          io.to(senderSocketId).emit("newMessage", fallbackMessage);
+        }
       }
     }
 
@@ -173,7 +217,7 @@ export const markMessagesAsRead = async (req, res) => {
     });
 
     if (!conversation) {
-      return res.status(404).json({ message: "Conversation not found" });
+      return res.status(200).json({ message: "No conversation found, nothing to read." });
     }
 
     await Message.updateMany(
@@ -193,5 +237,62 @@ export const markMessagesAsRead = async (req, res) => {
   } catch (error) {
     console.log("Error in markMessagesAsRead:", error.message);
     res.status(500).json({ error: "Internal server error" });
+  }
+};
+
+// --- Controller: Transcribe Audio ---
+export const transcribeAudio = async (req, res) => {
+  try {
+    const { audio } = req.body;
+    if (!audio) {
+      return res.status(400).json({ error: "No audio data provided" });
+    }
+
+    // 1. Process Base64
+    // We expect "data:audio/webm;base64,..."
+    const { buffer, mimetype } = processBase64(audio);
+
+    // 2. Prepare Gemini Prompt
+    const prompt = "Generate a transcription of the audio file. Return ONLY the transcribed text, no explanation.";
+
+    // 3. Call Gemini (Reusing our robust fallback logic)
+    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+
+    // Fallback list based on availablity
+    const modelsToTry = ["gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-flash-latest", "gemini-pro-latest"];
+    let transcription = "";
+    let lastError = null;
+
+    for (const modelName of modelsToTry) {
+      try {
+        console.log(`🎙️ Attempting transcription with model: ${modelName}`);
+        const model = genAI.getGenerativeModel({ model: modelName });
+        const result = await model.generateContent([
+          prompt,
+          {
+            inlineData: {
+              data: buffer.toString("base64"),
+              mimeType: mimetype
+            }
+          }
+        ]);
+        transcription = result.response.text();
+        console.log(`✅ Transcription success with ${modelName}`);
+        break;
+      } catch (e) {
+        console.warn(`⚠️ Model ${modelName} failed transcription: ${e.message}`);
+        lastError = e;
+      }
+    }
+
+    if (!transcription && lastError) {
+      throw lastError; // Re-throw if all failed
+    }
+
+    res.status(200).json({ text: transcription.trim() });
+
+  } catch (error) {
+    console.error("Error in transcribeAudio controller:", error);
+    res.status(500).json({ error: "Transcription failed", details: error.message });
   }
 };
