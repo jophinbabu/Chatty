@@ -36,6 +36,15 @@ const userSchema = new mongoose.Schema(
       type: Date,
       default: Date.now,
     },
+    pushSubscriptions: [
+      {
+        endpoint: String,
+        keys: {
+          p256dh: String,
+          auth: String,
+        },
+      },
+    ],
   },
   { timestamps: true },
 );

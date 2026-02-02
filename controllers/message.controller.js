@@ -5,6 +5,7 @@ import { uploadToS3 } from "../lib/s3.js";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import dotenv from "dotenv";
 import { encryptMessage, decryptMessage } from "../lib/encryption.js";
+import { sendPushToUser } from "../lib/push.js"; // Import helper
 
 console.log("🔄 Message Controller Loaded"); // Trigger restart
 
@@ -88,6 +89,44 @@ export const sendMessage = async (req, res) => {
     const receiverSocketId = getReceiverSocketId(receiverId);
     if (receiverSocketId) {
       io.to(receiverSocketId).emit("newMessage", newMessage);
+    } else {
+      // 🚀 SEND PUSH NOTIFICATION (If user is offline / socket disconnected)
+      // Note: We can send it ALWAYS, or just when receiverSocketId is null.
+      // Usually "Background" implies socket is disconnected, so this is the right place.
+      // BUT, some mobile browsers kill sockets aggressively even if "open".
+      // Let's safe bet: Send push if socket is missing OR always?
+      // "Always" might double-notify if app is open.
+      // "Else" is safer for "Background" only requirement.
+
+      try {
+        const receiver = await User.findById(receiverId);
+        if (receiver && receiver.pushSubscriptions && receiver.pushSubscriptions.length > 0) {
+          const payload = JSON.stringify({
+            title: `New Message from ${req.user.fullName}`,
+            body: text || "Sent a file", // Note: text is encrypted in DB but req.body is what we got. Wait, logic above ENCRYPTS it? No, controller receives PLAIN (usually) or ENCRYPTED?
+            // Wait, front-end encrypts NOW. So `req.body.text` IS ENCRYPTED.
+            // We need to either send "You have a new message" (privacy safe)
+            // or decrypt it if we want to show content.
+            // Since we don't have the key on backend (Wait, we DO have it for AI),
+            // we CAN decrypt it.
+            // Let's decrypt for the notification body (User experience).
+            // decryptMessage is imported
+            // const decryptedText = decryptMessage(text);
+            // body: decryptedText || "You have a new message",
+            // Actually, let's keep it simple and privacy-preserving first.
+            body: "You have a new encrypted message",
+            url: `/`, // Open app root or specific chat
+            icon: "/logo.jpg"
+          });
+
+          // We need web-push setup here.
+          // Ideally this should be a helper function to avoid clutter.
+          // But I'll inline for now or import.
+          sendPushToUser(receiver.pushSubscriptions, payload);
+        }
+      } catch (pushErr) {
+        console.error("Push notification failed:", pushErr);
+      }
     }
 
     // 7. Send Response to Client
