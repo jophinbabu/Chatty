@@ -10,10 +10,10 @@ const generateToken = (userId, res) => {
   });
 
   res.cookie("jwt", token, {
-    maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days in milliseconds
+    maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
     httpOnly: true,                  // Prevents XSS attacks
-    sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
-    secure: process.env.NODE_ENV !== "development", // HTTPS in production
+    sameSite: "none",                // 🟢 FIXED: Always allow cross-site (Vercel <-> Render)
+    secure: true,                    // 🟢 FIXED: Always use HTTPS
   });
 
   return token;
