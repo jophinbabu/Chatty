@@ -4,6 +4,7 @@ import { getReceiverSocketId, io } from "../socket/socket.js";
 import { uploadToS3 } from "../lib/s3.js";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import dotenv from "dotenv";
+import { encryptMessage, decryptMessage } from "../lib/encryption.js";
 
 console.log("🔄 Message Controller Loaded"); // Trigger restart
 
@@ -98,6 +99,10 @@ export const sendMessage = async (req, res) => {
     // Check if the receiver is the AI User ID AND we have an API Key
     if (receiverId === process.env.AI_USER_ID && text && process.env.GEMINI_API_KEY) {
       try {
+        // Decrypt the user's message to get the actual prompt for AI
+        const promptText = decryptMessage(text);
+        if (!promptText) throw new Error("Failed to decrypt message for AI processing");
+
         const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
         let aiResponseText = "";
 
@@ -110,7 +115,7 @@ export const sendMessage = async (req, res) => {
             try {
               console.log(`🤖 Attempting AI generation with model: ${modelName}`);
               const model = genAI.getGenerativeModel({ model: modelName });
-              const result = await model.generateContent(text);
+              const result = await model.generateContent(promptText);
               aiResponseText = result.response.text();
               console.log(`✅ Success with ${modelName}`);
               break; // Success! Exit loop
@@ -128,17 +133,20 @@ export const sendMessage = async (req, res) => {
           throw finalError;
         }
 
+        // Encrypt the AI's response before storing
+        const encryptedAiResponse = encryptMessage(aiResponseText);
+
         // B. Create AI Message Object
         const aiMessage = new Message({
           conversationId: conversation._id,
           sender: receiverId, // AI is the sender
-          text: aiResponseText,
+          text: encryptedAiResponse,
           isRead: false,
         });
 
         // C. Update Conversation again with AI's reply
         conversation.lastMessage = {
-          text: aiResponseText,
+          text: encryptedAiResponse,
           sender: receiverId,
           createdAt: new Date(),
         };
@@ -154,11 +162,14 @@ export const sendMessage = async (req, res) => {
       } catch (aiError) {
         console.error("❌ All AI Models Failed:", aiError);
 
+        const errorMessage = "I'm having trouble connecting to AI. Error: " + (aiError.message || "Unknown Error");
+        const encryptedErrorMessage = encryptMessage(errorMessage);
+
         // Fallback message with debug info
         const fallbackMessage = new Message({
           conversationId: conversation._id,
           sender: receiverId,
-          text: "I'm having trouble connecting to AI. Error: " + (aiError.message || "Unknown Error"),
+          text: encryptedErrorMessage,
           isRead: false,
         });
 
