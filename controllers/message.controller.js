@@ -93,7 +93,10 @@ export const sendMessage = async (req, res) => {
 
     // 🚀 SEND PUSH NOTIFICATION (Always try, let SW filter if app is open)
     try {
+      console.log("🔔 Checking push subscriptions for receiver:", receiverId);
       const receiver = await User.findById(receiverId);
+      console.log("🔔 Receiver found:", receiver?.fullName, "Subscriptions:", receiver?.pushSubscriptions?.length || 0);
+
       if (receiver && receiver.pushSubscriptions && receiver.pushSubscriptions.length > 0) {
         const payload = JSON.stringify({
           title: `New Message from ${req.user.fullName}`,
@@ -101,8 +104,10 @@ export const sendMessage = async (req, res) => {
           url: `/`,
           icon: "/logo.jpg"
         });
-
+        console.log("🔔 Sending push with payload:", payload);
         sendPushToUser(receiver.pushSubscriptions, payload);
+      } else {
+        console.log("🔔 No push subscriptions for this user");
       }
     } catch (pushErr) {
       console.error("Push notification failed:", pushErr);
