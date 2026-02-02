@@ -10,10 +10,14 @@ export const subscribeToNotifications = async (req, res) => {
             return res.status(400).json({ message: "Invalid subscription data" });
         }
 
+        console.log("Received push subscription:", subscription);
+
         // Add subscription to user if it doesn't exist
         await User.findByIdAndUpdate(userId, {
             $addToSet: { pushSubscriptions: subscription },
         });
+
+        console.log("Saved push subscription for user:", userId);
 
         res.status(201).json({ message: "Subscribed to push notifications" });
     } catch (error) {
