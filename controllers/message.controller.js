@@ -1,5 +1,6 @@
 import Conversation from "../models/Conversation.js";
 import Message from "../models/Message.js";
+import User from "../models/User.js"; // Added for push notifications
 import { getReceiverSocketId, io } from "../socket/socket.js";
 import { uploadToS3 } from "../lib/s3.js";
 import { GoogleGenerativeAI } from "@google/generative-ai";
