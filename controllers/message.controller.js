@@ -43,6 +43,10 @@ export const sendMessage = async (req, res) => {
     let imageUrl = null;
     let audioUrl = null;
 
+    // Decrypt text for notification payload (if text exists)
+    // We do this early so we can use it in the push notification
+    const decryptedText = text ? decryptMessage(text) : "";
+
     // 1. Handle Image Upload
     if (image) {
       const { buffer, fileName, mimetype } = processBase64(image);
@@ -135,7 +139,7 @@ export const sendMessage = async (req, res) => {
 
           const payload = JSON.stringify({
             title,
-            body: text ? (text.length > 50 ? text.substring(0, 50) + "..." : text) : "Sent an attachment",
+            body: decryptedText ? (decryptedText.length > 50 ? decryptedText.substring(0, 50) + "..." : decryptedText) : "Sent an attachment",
             url: `/`, // Deep link logic could be improved
             icon: "/logo.jpg"
           });
