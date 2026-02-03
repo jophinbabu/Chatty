@@ -9,6 +9,10 @@ const conversationSchema = new mongoose.Schema(
       sender: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
       createdAt: Date,
     },
+    isGroup: { type: Boolean, default: false },
+    groupName: { type: String },
+    groupAdmin: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+    groupImage: { type: String },
   },
   { timestamps: true },
 );

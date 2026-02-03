@@ -7,6 +7,8 @@ import { connectDB } from "./lib/db.js";
 import authRoutes from "./routes/auth.routes.js";
 import messageRoutes from "./routes/message.routes.js";
 import userRoutes from "./routes/user.routes.js";
+import groupRoutes from "./routes/group.route.js";
+import configRoutes from "./routes/config.route.js";
 import { app, server } from "./socket/socket.js";
 
 dotenv.config();
@@ -25,6 +27,8 @@ app.use(
 app.use("/api/auth", authRoutes);
 app.use("/api/messages", messageRoutes);
 app.use("/api/users", userRoutes);
+app.use("/api/groups", groupRoutes);
+app.use("/api/config", configRoutes);
 
 server.listen(PORT, "0.0.0.0", () => {
   console.log("server is running on PORT:" + PORT);

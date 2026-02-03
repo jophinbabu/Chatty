@@ -37,7 +37,7 @@ const processBase64 = (base64String) => {
 export const sendMessage = async (req, res) => {
   try {
     const { text, image, audio, duration } = req.body;
-    const { id: receiverId } = req.params;
+    const { id: inputId } = req.params; // receiving User ID OR Conversation ID
     const senderId = req.user.id;
 
     let imageUrl = null;
@@ -56,14 +56,37 @@ export const sendMessage = async (req, res) => {
     }
 
     // 3. Find or Create Conversation
-    let conversation = await Conversation.findOne({
-      participants: { $all: [senderId, receiverId] },
-    });
+    let conversation;
+    let receiverId = null;
 
-    if (!conversation) {
-      conversation = await Conversation.create({
-        participants: [senderId, receiverId],
+    // Check if inputId is a valid User (DM)
+    const potentialUser = await User.findById(inputId);
+
+    if (potentialUser) {
+      // It's a DM
+      receiverId = inputId;
+      conversation = await Conversation.findOne({
+        participants: { $all: [senderId, receiverId], $size: 2 }, // strict size check to avoid grabbing group chats? Actually our schema separates them? 
+        // We should add { isGroup: false } to be safe
+        isGroup: false
       });
+
+      if (!conversation) {
+        conversation = await Conversation.create({
+          participants: [senderId, receiverId],
+          isGroup: false
+        });
+      }
+    } else {
+      // It might be a Group ID
+      conversation = await Conversation.findById(inputId).populate("participants");
+      if (!conversation) {
+        return res.status(404).json({ message: "Conversation/User found" });
+      }
+      // Verify Sender is participant
+      if (!conversation.participants.some(p => p._id.toString() === senderId)) {
+        return res.status(403).json({ message: "Not a participant" });
+      }
     }
 
     // 4. Create User Message
@@ -86,33 +109,42 @@ export const sendMessage = async (req, res) => {
 
     await Promise.all([conversation.save(), newMessage.save()]);
 
-    // 6. Socket Emission (To Human Receiver)
-    const receiverSocketId = getReceiverSocketId(receiverId);
-    if (receiverSocketId) {
-      io.to(receiverSocketId).emit("newMessage", newMessage);
-    }
+    // 6. Socket Emission & Notification
+    // Iterate through ALL participants (except sender)
+    // If it's a group, participants are populated objects or IDs?
+    // If we populated earlier (Group case), we have objects.
+    // If DM, we didn't populate.
 
-    // 🚀 SEND PUSH NOTIFICATION (Always try, let SW filter if app is open)
-    try {
-      console.log("🔔 Checking push subscriptions for receiver:", receiverId);
-      const receiver = await User.findById(receiverId);
-      console.log("🔔 Receiver found:", receiver?.fullName, "Subscriptions:", receiver?.pushSubscriptions?.length || 0);
+    // Let's rely on stored IDs.
+    const recipientIds = conversation.participants.map(p => (p._id ? p._id.toString() : p.toString())).filter(id => id !== senderId);
 
-      if (receiver && receiver.pushSubscriptions && receiver.pushSubscriptions.length > 0) {
-        const payload = JSON.stringify({
-          title: `New Message from ${req.user.fullName}`,
-          body: "You have a new encrypted message",
-          url: `/`,
-          icon: "/logo.jpg"
-        });
-        console.log("🔔 Sending push with payload:", payload);
-        sendPushToUser(receiver.pushSubscriptions, payload);
-      } else {
-        console.log("🔔 No push subscriptions for this user");
+    recipientIds.forEach(async (recipientId) => {
+      // A. Socket
+      const socketId = getReceiverSocketId(recipientId);
+      if (socketId) {
+        io.to(socketId).emit("newMessage", newMessage);
       }
-    } catch (pushErr) {
-      console.error("Push notification failed:", pushErr);
-    }
+
+      // B. Push Notification
+      try {
+        const userToNotify = await User.findById(recipientId);
+        if (userToNotify && userToNotify.pushSubscriptions?.length > 0) {
+          const title = conversation.isGroup
+            ? `${conversation.groupName}: ${req.user.fullName}`
+            : `New Message from ${req.user.fullName}`;
+
+          const payload = JSON.stringify({
+            title,
+            body: text ? (text.length > 50 ? text.substring(0, 50) + "..." : text) : "Sent an attachment",
+            url: `/`, // Deep link logic could be improved
+            icon: "/logo.jpg"
+          });
+          sendPushToUser(userToNotify.pushSubscriptions, payload);
+        }
+      } catch (err) {
+        console.error("Push failed for", recipientId, err);
+      }
+    });
 
     // 7. Send Response to Client
     res.status(201).json(newMessage);
@@ -219,14 +251,32 @@ export const sendMessage = async (req, res) => {
 };
 
 // --- Controller: Get Messages ---
+// --- Controller: Get Messages ---
 export const getMessages = async (req, res) => {
   try {
-    const { id: userToChatId } = req.params;
+    const { id: inputId } = req.params; // User ID or Group ID
     const senderId = req.user.id;
 
-    const conversation = await Conversation.findOne({
-      participants: { $all: [senderId, userToChatId] },
-    });
+    let conversation;
+
+    // Check if inputId is a Group (Conversation)
+    // We can optimization: assume if it fails User check or based on prefix, but simplest is:
+    // Try to find if inputId is a valid User to maintain backward compat for DMs
+    const potentialUser = await User.findById(inputId);
+
+    if (potentialUser) {
+      // It's a DM, find conversation by participants
+      conversation = await Conversation.findOne({
+        participants: { $all: [senderId, inputId] },
+        isGroup: false
+      });
+    } else {
+      // It's likely a group ID
+      conversation = await Conversation.findOne({
+        _id: inputId,
+        participants: senderId // Ensure user is in group
+      });
+    }
 
     if (!conversation) return res.status(200).json([]);
 
