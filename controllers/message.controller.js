@@ -126,7 +126,10 @@ export const sendMessage = async (req, res) => {
       // A. Socket
       const socketId = getReceiverSocketId(recipientId);
       if (socketId) {
-        io.to(socketId).emit("newMessage", newMessage);
+        io.to(socketId).emit("newMessage", {
+          ...newMessage.toObject(),
+          isGroup: conversation.isGroup
+        });
       }
 
       // B. Push Notification
