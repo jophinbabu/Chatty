@@ -19,6 +19,9 @@ const generateToken = (userId, res) => {
   return token;
 };
 
+import { sendVerificationEmail } from "../lib/mail.js";
+import crypto from "crypto";
+
 export const signup = async (req, res) => {
   try {
     const { fullName, email, password } = req.body;
@@ -38,29 +41,85 @@ export const signup = async (req, res) => {
     const salt = await bcrypt.genSalt(10);
     const hashPassword = await bcrypt.hash(password, salt);
 
+    // Generate 6-digit OTP
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const otpExpires = new Date(Date.now() + 10 * 60 * 1000); // 10 mins
+
     const newUser = new User({
       fullName,
       email,
       password: hashPassword,
+      isVerified: false,
+      otp,
+      otpExpires,
     });
 
     if (newUser) {
-      // Generate JWT token and set as cookie
-      const token = generateToken(newUser._id, res);
       await newUser.save();
 
+      // Send Email
+      await sendVerificationEmail(email, otp);
+
+      // Return minimal info - NO TOKEN yet
       res.status(201).json({
         _id: newUser._id,
-        fullName: newUser.fullName,
         email: newUser.email,
-        profilePic: newUser.profilePic,
-        token,
+        message: "Verification OTP sent to email",
+        isVerified: false
       });
     } else {
       res.status(400).json({ message: "Invalid user data" });
     }
   } catch (error) {
     console.error("Error in signup controller:", error);
+    res.status(500).json({ message: "Internal Server Error" });
+  }
+};
+
+export const verifyEmail = async (req, res) => {
+  try {
+    const { email, otp } = req.body;
+
+    const user = await User.findOne({ email }).select("+otp +otpExpires");
+
+    if (!user) {
+      return res.status(400).json({ message: "User not found" });
+    }
+
+    if (user.isVerified) {
+      return res.status(400).json({ message: "User already verified" });
+    }
+
+    if (!user.otp || !user.otpExpires) {
+      return res.status(400).json({ message: "No OTP found. Request a new one." });
+    }
+
+    if (user.otp !== otp) {
+      return res.status(400).json({ message: "Invalid OTP" });
+    }
+
+    if (new Date() > user.otpExpires) {
+      return res.status(400).json({ message: "OTP expired" });
+    }
+
+    user.isVerified = true;
+    user.otp = undefined;
+    user.otpExpires = undefined;
+    await user.save();
+
+    const token = generateToken(user._id, res);
+
+    res.status(200).json({
+      _id: user._id,
+      fullName: user.fullName,
+      email: user.email,
+      profilePic: user.profilePic,
+      token,
+      isVerified: true
+    });
+
+  } catch (error) {
+    console.error("Error in verifyEmail:", error);
     res.status(500).json({ message: "Internal Server Error" });
   }
 };
@@ -73,6 +132,10 @@ export const login = async (req, res) => {
     const user = await User.findOne({ email });
     if (!user) {
       return res.status(400).json({ message: "Invalid Credentials" });
+    }
+
+    if (!user.isVerified) {
+      return res.status(400).json({ message: "Email not verified. Please verify your email.", isVerified: false });
     }
 
     // 2. Compare password with hashed password
