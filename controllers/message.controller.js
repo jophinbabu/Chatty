@@ -143,7 +143,7 @@ export const sendMessage = async (req, res) => {
             url: `/`, // Deep link logic could be improved
             icon: "/logo.jpg"
           });
-          sendPushToUser(userToNotify.pushSubscriptions, payload);
+          sendPushToUser(userToNotify.pushSubscriptions, payload, userToNotify._id);
         }
       } catch (err) {
         console.error("Push failed for", recipientId, err);
