@@ -12,14 +12,23 @@ export const subscribeToNotifications = async (req, res) => {
 
         console.log("Received push subscription:", subscription);
 
-        // Add subscription to user if it doesn't exist
-        await User.findByIdAndUpdate(userId, {
-            $addToSet: { pushSubscriptions: subscription },
-        });
+        // Find user
+        const user = await User.findById(userId);
+        if (user) {
+            // Remove any existing subscription with the same endpoint to prevent duplicates
+            user.pushSubscriptions = user.pushSubscriptions.filter(
+                (sub) => sub.endpoint !== subscription.endpoint
+            );
 
-        console.log("Saved push subscription for user:", userId);
+            // Add the new subscription
+            user.pushSubscriptions.push(subscription);
+            await user.save();
 
-        res.status(201).json({ message: "Subscribed to push notifications" });
+            console.log("Saved push subscription for user (duplicates removed):", userId);
+            res.status(201).json({ message: "Subscribed to push notifications" });
+        } else {
+            res.status(404).json({ message: "User not found" });
+        }
     } catch (error) {
         console.error("Error subscribing to notifications:", error);
         res.status(500).json({ message: "Internal server error" });
