@@ -94,7 +94,7 @@ io.on("connection", (socket) => {
   socket.on("endCall", (data) => {
     const receiverSocketId = getReceiverSocketId(data.to);
     if (receiverSocketId) {
-      io.to(receiverSocketId).emit("callEnded");
+      io.to(receiverSocketId).emit("callEnded", { reason: data.reason });
     }
   });
   socket.on("typing", ({ senderId, receiverId }) => {
