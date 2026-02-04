@@ -36,9 +36,11 @@ const processBase64 = (base64String) => {
 // --- Controller: Send Message ---
 export const sendMessage = async (req, res) => {
   try {
-    const { text, image, audio, duration } = req.body;
+    const { text, image, audio, duration, isInvisible } = req.body;
     const { id: inputId } = req.params; // receiving User ID OR Conversation ID
     const senderId = req.user.id;
+
+    console.log("📨 sendMessage called. Body:", { text, hasImage: !!image, hasAudio: !!audio, isInvisible });
 
     let imageUrl = null;
     let audioUrl = null;
@@ -100,9 +102,12 @@ export const sendMessage = async (req, res) => {
       text,
       image: imageUrl,
       audioUrl: audioUrl,
+      audioUrl: audioUrl,
       duration: duration || 0, // Save duration
+      isInvisible: isInvisible || false,
       isRead: false,
     });
+    console.log("💾 Message object created:", { id: newMessage._id, isInvisible: newMessage.isInvisible });
 
     // 5. Update Conversation
     conversation.lastMessage = {
@@ -126,11 +131,13 @@ export const sendMessage = async (req, res) => {
       // A. Socket
       const socketId = getReceiverSocketId(recipientId);
       if (socketId) {
-        io.to(socketId).emit("newMessage", {
+        const emitPayload = {
           ...newMessage.toObject(),
           conversationId: conversation._id,
           isGroup: conversation.isGroup
-        });
+        };
+        console.log("📡 Emitting socket message to", recipientId, "Payload `isInvisible`:", emitPayload.isInvisible);
+        io.to(socketId).emit("newMessage", emitPayload);
       }
 
       // B. Push Notification

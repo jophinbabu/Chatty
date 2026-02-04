@@ -18,6 +18,10 @@ const messageSchema = new mongoose.Schema(
     image: { type: String },
     audioUrl: { type: String },
     duration: { type: Number },
+    isInvisible: {
+      type: Boolean,
+      default: false,
+    },
     isRead: { type: Boolean, default: false },
   },
   { timestamps: true },
