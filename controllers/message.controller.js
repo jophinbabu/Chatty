@@ -40,8 +40,6 @@ export const sendMessage = async (req, res) => {
     const { id: inputId } = req.params; // receiving User ID OR Conversation ID
     const senderId = req.user.id;
 
-    console.log("📨 sendMessage called. Body:", { text, hasImage: !!image, hasAudio: !!audio, isInvisible });
-
     let imageUrl = null;
     let audioUrl = null;
 
@@ -107,7 +105,6 @@ export const sendMessage = async (req, res) => {
       isInvisible: isInvisible || false,
       isRead: false,
     });
-    console.log("💾 Message object created:", { id: newMessage._id, isInvisible: newMessage.isInvisible });
 
     // 5. Update Conversation
     conversation.lastMessage = {
@@ -136,7 +133,6 @@ export const sendMessage = async (req, res) => {
           conversationId: conversation._id,
           isGroup: conversation.isGroup
         };
-        console.log("📡 Emitting socket message to", recipientId, "Payload `isInvisible`:", emitPayload.isInvisible);
         io.to(socketId).emit("newMessage", emitPayload);
       }
 
