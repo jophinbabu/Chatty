@@ -111,6 +111,28 @@ io.on("connection", (socket) => {
       io.to(receiverSocketId).emit("hideTyping", { senderId });
     }
   });
+
+  // --- 🎨 WHITEBOARD EVENTS ---
+  socket.on("whiteboard-draw", (data) => {
+    const receiverSocketId = getReceiverSocketId(data.to);
+    if (receiverSocketId) {
+      io.to(receiverSocketId).emit("whiteboard-draw", data);
+    }
+  });
+
+  socket.on("whiteboard-clear", (data) => {
+    const receiverSocketId = getReceiverSocketId(data.to);
+    if (receiverSocketId) {
+      io.to(receiverSocketId).emit("whiteboard-clear", data);
+    }
+  });
+
+  socket.on("whiteboard-open", (data) => {
+    const receiverSocketId = getReceiverSocketId(data.to);
+    if (receiverSocketId) {
+      io.to(receiverSocketId).emit("whiteboard-open", data);
+    }
+  });
 });
 
 // Export app and server to be used in server.js
