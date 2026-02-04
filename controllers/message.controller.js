@@ -128,6 +128,7 @@ export const sendMessage = async (req, res) => {
       if (socketId) {
         io.to(socketId).emit("newMessage", {
           ...newMessage.toObject(),
+          conversationId: conversation._id,
           isGroup: conversation.isGroup
         });
       }

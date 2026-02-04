@@ -1,4 +1,5 @@
 import User from "../models/User.js";
+import PendingUser from "../models/PendingUser.js";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import Message from "../models/Message.js";
@@ -34,9 +35,14 @@ export const signup = async (req, res) => {
       return res.status(400).json({ message: "Password must be at least 6 characters" });
     }
 
+    // Check if user already exists in User collection (already verified)
     const existingUser = await User.findOne({ email });
-    if (existingUser)
+    if (existingUser) {
       return res.status(400).json({ message: "User already exists" });
+    }
+
+    // Check if there's a pending signup (delete old one if exists)
+    await PendingUser.findOneAndDelete({ email });
 
     const salt = await bcrypt.genSalt(10);
     const hashPassword = await bcrypt.hash(password, salt);
@@ -45,31 +51,26 @@ export const signup = async (req, res) => {
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
     const otpExpires = new Date(Date.now() + 10 * 60 * 1000); // 10 mins
 
-    const newUser = new User({
+    // Create pending user (NOT actual user yet)
+    const pendingUser = new PendingUser({
       fullName,
       email,
       password: hashPassword,
-      isVerified: false,
       otp,
       otpExpires,
     });
 
-    if (newUser) {
-      await newUser.save();
+    await pendingUser.save();
 
-      // Send Email
-      await sendVerificationEmail(email, otp);
+    // Send Email
+    await sendVerificationEmail(email, otp);
 
-      // Return minimal info - NO TOKEN yet
-      res.status(201).json({
-        _id: newUser._id,
-        email: newUser.email,
-        message: "Verification OTP sent to email",
-        isVerified: false
-      });
-    } else {
-      res.status(400).json({ message: "Invalid user data" });
-    }
+    // Return minimal info - NO TOKEN yet, NO user created
+    res.status(201).json({
+      email: pendingUser.email,
+      message: "Verification OTP sent to email",
+      isVerified: false
+    });
   } catch (error) {
     console.error("Error in signup controller:", error);
     res.status(500).json({ message: "Internal Server Error" });
@@ -80,40 +81,44 @@ export const verifyEmail = async (req, res) => {
   try {
     const { email, otp } = req.body;
 
-    const user = await User.findOne({ email }).select("+otp +otpExpires");
+    // Look up in PendingUser collection (not User)
+    const pendingUser = await PendingUser.findOne({ email });
 
-    if (!user) {
-      return res.status(400).json({ message: "User not found" });
+    if (!pendingUser) {
+      return res.status(400).json({ message: "No pending signup found. Please sign up again." });
     }
 
-    if (user.isVerified) {
-      return res.status(400).json({ message: "User already verified" });
-    }
-
-    if (!user.otp || !user.otpExpires) {
-      return res.status(400).json({ message: "No OTP found. Request a new one." });
-    }
-
-    if (user.otp !== otp) {
+    if (pendingUser.otp !== otp) {
       return res.status(400).json({ message: "Invalid OTP" });
     }
 
-    if (new Date() > user.otpExpires) {
-      return res.status(400).json({ message: "OTP expired" });
+    if (new Date() > pendingUser.otpExpires) {
+      // Clean up expired pending user
+      await PendingUser.findByIdAndDelete(pendingUser._id);
+      return res.status(400).json({ message: "OTP expired. Please sign up again." });
     }
 
-    user.isVerified = true;
-    user.otp = undefined;
-    user.otpExpires = undefined;
-    await user.save();
+    // OTP is valid! Create the actual User account now
+    const newUser = new User({
+      fullName: pendingUser.fullName,
+      email: pendingUser.email,
+      password: pendingUser.password, // Already hashed
+      isVerified: true, // Mark as verified immediately
+    });
 
-    const token = generateToken(user._id, res);
+    await newUser.save();
+
+    // Delete the pending user record (cleanup)
+    await PendingUser.findByIdAndDelete(pendingUser._id);
+
+    // Generate token and set cookie
+    const token = generateToken(newUser._id, res);
 
     res.status(200).json({
-      _id: user._id,
-      fullName: user.fullName,
-      email: user.email,
-      profilePic: user.profilePic,
+      _id: newUser._id,
+      fullName: newUser.fullName,
+      email: newUser.email,
+      profilePic: newUser.profilePic,
       token,
       isVerified: true
     });
