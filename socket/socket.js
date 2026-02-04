@@ -155,6 +155,32 @@ io.on("connection", (socket) => {
       io.to(receiverSocketId).emit("game-reset", data);
     }
   });
+
+  // --- 🎨 PICTIONARY EVENTS ---
+  socket.on("pictionary-invite", (data) => {
+    const receiverSocketId = getReceiverSocketId(data.to);
+    if (receiverSocketId) io.to(receiverSocketId).emit("pictionary-invite", data);
+  });
+
+  socket.on("pictionary-start", (data) => {
+    const receiverSocketId = getReceiverSocketId(data.to);
+    if (receiverSocketId) io.to(receiverSocketId).emit("pictionary-start", data);
+  });
+
+  socket.on("pictionary-draw", (data) => {
+    const receiverSocketId = getReceiverSocketId(data.to);
+    if (receiverSocketId) io.to(receiverSocketId).emit("pictionary-draw", data);
+  });
+
+  socket.on("pictionary-guess", (data) => {
+    const receiverSocketId = getReceiverSocketId(data.to);
+    if (receiverSocketId) io.to(receiverSocketId).emit("pictionary-guess", data);
+  });
+
+  socket.on("pictionary-game-over", (data) => {
+    const receiverSocketId = getReceiverSocketId(data.to);
+    if (receiverSocketId) io.to(receiverSocketId).emit("pictionary-game-over", data);
+  });
 });
 
 // Export app and server to be used in server.js
