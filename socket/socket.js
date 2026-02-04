@@ -133,6 +133,28 @@ io.on("connection", (socket) => {
       io.to(receiverSocketId).emit("whiteboard-open", data);
     }
   });
+
+  // --- 🎮 GAME EVENTS ---
+  socket.on("game-invite", (data) => {
+    const receiverSocketId = getReceiverSocketId(data.to);
+    if (receiverSocketId) {
+      io.to(receiverSocketId).emit("game-invite", data);
+    }
+  });
+
+  socket.on("game-move", (data) => {
+    const receiverSocketId = getReceiverSocketId(data.to);
+    if (receiverSocketId) {
+      io.to(receiverSocketId).emit("game-move", data);
+    }
+  });
+
+  socket.on("game-reset", (data) => {
+    const receiverSocketId = getReceiverSocketId(data.to);
+    if (receiverSocketId) {
+      io.to(receiverSocketId).emit("game-reset", data);
+    }
+  });
 });
 
 // Export app and server to be used in server.js
